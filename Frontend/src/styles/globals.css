@@ -1,0 +1,222 @@
+@import "tailwindcss";
+
+/* ============================================================
+   DRISHTI — Design Tokens
+   All color and spacing tokens live here.
+   Components must reference these values; never hardcode colors.
+   ============================================================ */
+
+@theme {
+  /* Typography */
+  --font-sans: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
+
+  /* Primary — calm clinical blue-teal */
+  --color-primary-50:  #f0fdfa;
+  --color-primary-100: #ccfbf1;
+  --color-primary-200: #99f6e4;
+  --color-primary-300: #5eead4;
+  --color-primary-400: #2dd4bf;
+  --color-primary-500: #14b8a6;
+  --color-primary-600: #0d9488;
+  --color-primary-700: #0f766e;
+  --color-primary-800: #115e59;
+  --color-primary-900: #134e4a;
+  --color-primary-950: #042f2e;
+
+  /* Semantic — success */
+  --color-success-50:  #f0fdf4;
+  --color-success-100: #dcfce7;
+  --color-success-500: #22c55e;
+  --color-success-600: #16a34a;
+  --color-success-700: #15803d;
+
+  /* Semantic — info */
+  --color-info-50:  #eff6ff;
+  --color-info-100: #dbeafe;
+  --color-info-500: #3b82f6;
+  --color-info-600: #2563eb;
+  --color-info-700: #1d4ed8;
+
+  /* Semantic — warning */
+  --color-warning-50:  #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
+
+  /* Semantic — danger */
+  --color-danger-50:  #fef2f2;
+  --color-danger-100: #fee2e2;
+  --color-danger-500: #ef4444;
+  --color-danger-600: #dc2626;
+  --color-danger-700: #b91c1c;
+
+  /* Severity scale — colorblind-safe ordered set */
+  /* No DR   — neutral slate   */
+  /* Mild    — sky blue        */
+  /* Moderate — amber          */
+  /* Severe  — orange          */
+  /* Proliferative — red       */
+  --color-severity-nodr:          #64748b;
+  --color-severity-nodr-bg:       #f1f5f9;
+  --color-severity-mild:          #0369a1;
+  --color-severity-mild-bg:       #e0f2fe;
+  --color-severity-moderate:      #b45309;
+  --color-severity-moderate-bg:   #fef3c7;
+  --color-severity-severe:        #c2410c;
+  --color-severity-severe-bg:     #ffedd5;
+  --color-severity-proliferative: #991b1b;
+  --color-severity-proliferative-bg: #fee2e2;
+
+  /* Triage */
+  --color-triage-routine:  #15803d;
+  --color-triage-followup: #0369a1;
+  --color-triage-doctor:   #6d28d9;
+  --color-triage-referral: #c2410c;
+  --color-triage-urgent:   #991b1b;
+}
+
+/* ============================================================
+   GLOBAL RESET & BASE STYLES
+   ============================================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  /* Tabular numerals for all numeric data */
+  font-variant-numeric: tabular-nums;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: #1e293b; /* slate-800 */
+  background-color: #f8fafc; /* slate-50 */
+}
+
+/* Remove dark mode — not required for this product */
+/* The Vite template had a prefers-color-scheme:dark block; it is intentionally omitted here */
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Focus ring — visible on every interactive element */
+:focus-visible {
+  outline: 2px solid #0f766e; /* primary-700 */
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Skip-to-content link */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.focus\:not-sr-only:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
+/* ============================================================
+   TYPOGRAPHY SCALE
+   ============================================================ */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  color: #0f172a; /* slate-900 */
+  line-height: 1.25;
+  margin: 0;
+}
+
+h1 { font-size: 1.875rem; } /* 30px */
+h2 { font-size: 1.5rem;   } /* 24px */
+h3 { font-size: 1.25rem;  } /* 20px */
+h4 { font-size: 1.125rem; } /* 18px */
+
+p { margin: 0; }
+
+/* Caption / helper text */
+.text-caption {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: #64748b; /* slate-500 */
+}
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   PAGE TRANSITION FADE (subtle, reduced-motion safe)
+   ============================================================ */
+.page-enter {
+  animation: page-fade-in 150ms ease-out both;
+}
+
+@keyframes page-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* ============================================================
+   SKELETON PULSE ANIMATION
+   ============================================================ */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
+}
+
+.skeleton-pulse {
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* ============================================================
+   DEMO BADGE — mock mode indicator
+   ============================================================ */
+.demo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: #fef3c7; /* warning-100 */
+  color: #b45309;      /* warning-700 */
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}

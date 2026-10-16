@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="8" fill="#0E2F76"/>
+  <!-- Eye outline -->
+  <ellipse cx="16" cy="16" rx="10" ry="7" stroke="#AAC0E1" stroke-width="1.8" fill="none"/>
+  <!-- Iris -->
+  <circle cx="16" cy="16" r="4.5" fill="#AAC0E1"/>
+  <!-- Pupil -->
+  <circle cx="16" cy="16" r="2.5" fill="#0E2F76"/>
+  <!-- AI grid dots -->
+  <circle cx="6" cy="8" r="1" fill="rgba(170,192,225,0.5)"/>
+  <circle cx="10" cy="7" r="0.7" fill="rgba(170,192,225,0.4)"/>
+  <circle cx="26" cy="8" r="1" fill="rgba(170,192,225,0.5)"/>
+  <circle cx="22" cy="7" r="0.7" fill="rgba(170,192,225,0.4)"/>
+  <!-- Sparkle top right -->
+  <circle cx="26" cy="6" r="1.2" fill="#60A5FA"/>
+</svg>
