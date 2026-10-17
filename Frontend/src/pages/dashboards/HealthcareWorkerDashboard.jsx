@@ -17,7 +17,9 @@ import {
   FileText,
   UserCheck,
   Stethoscope,
-  Activity
+  Activity,
+  Copy,
+  Check
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import DashboardShell from '../../components/dashboard/DashboardShell';
@@ -43,6 +45,9 @@ export default function HealthcareWorkerDashboard() {
   const [registering, setRegistering] = useState(false);
   const [regError, setRegError] = useState('');
   const [regSuccess, setRegSuccess] = useState('');
+  const [registeredPatientSuccess, setRegisteredPatientSuccess] = useState(null);
+  const [copiedClaimCode, setCopiedClaimCode] = useState(false);
+  const [copyError, setCopyError] = useState(false);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -79,6 +84,77 @@ export default function HealthcareWorkerDashboard() {
     loadPatients();
   }, [searchTerm]);
 
+  // Reset and close registration modal
+  function closeRegisterModal() {
+    setShowRegisterModal(false);
+    setRegisteredPatientSuccess(null);
+    setCopiedClaimCode(false);
+    setCopyError(false);
+    setRegError('');
+    setRegSuccess('');
+    setFormData({
+      firstName: '',
+      lastName: '',
+      phone: '',
+      gender: 'female',
+      dateOfBirth: '',
+      village: '',
+      district: '',
+      state: '',
+      diabetesStatus: 'yes',
+      diabetesDuration: ''
+    });
+  }
+
+  // Copy claim code with clipboard API and safe fallback
+  async function handleCopyClaimCode(code) {
+    if (!code) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+        setCopiedClaimCode(true);
+        setCopyError(false);
+        setTimeout(() => setCopiedClaimCode(false), 3000);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = code;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (successful) {
+          setCopiedClaimCode(true);
+          setCopyError(false);
+          setTimeout(() => setCopiedClaimCode(false), 3000);
+        } else {
+          setCopyError(true);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to copy claim code:', err);
+      setCopyError(true);
+      setCopiedClaimCode(false);
+    }
+  }
+
+  // Launch screening directly for newly enrolled patient from modal
+  function handleStartScreeningForNewPatient() {
+    if (!registeredPatientSuccess) return;
+    const patientItem = {
+      _id: registeredPatientSuccess.profileId,
+      profileId: registeredPatientSuccess.profileId,
+      patientId: registeredPatientSuccess.patientId,
+      fullName: registeredPatientSuccess.rawFullName || { firstName: registeredPatientSuccess.fullName, lastName: '' },
+      phone: registeredPatientSuccess.phone,
+      claimStatus: 'unclaimed'
+    };
+    closeRegisterModal();
+    setAssistedPatient(patientItem);
+    setActiveView('screening');
+  }
+
   // Submit new patient registration
   async function handleRegisterPatient(e) {
     e.preventDefault();
@@ -110,25 +186,40 @@ export default function HealthcareWorkerDashboard() {
       const res = await registerFieldPatient(payload);
       const newPatientData = res?.data;
 
-      setRegSuccess(`Patient enrolled! Assigned Login ID: ${newPatientData?.patientId || newPatientData?.user?.loginId || 'GENERATED'}`);
-      
-      setTimeout(() => {
-        setShowRegisterModal(false);
-        setRegSuccess('');
-        setFormData({
-          firstName: '',
-          lastName: '',
-          phone: '',
-          gender: 'female',
-          dateOfBirth: '',
-          village: '',
-          district: '',
-          state: '',
-          diabetesStatus: 'yes',
-          diabetesDuration: ''
-        });
-        loadPatients();
-      }, 1500);
+      // Extract details directly from backend response (SEC-04)
+      const patientId = newPatientData?.patientId || null;
+      const profileId = newPatientData?.profileId || newPatientData?._id || null;
+      const claimCode = newPatientData?.claimCode || null;
+      const fullName = newPatientData?.fullName
+        ? `${newPatientData.fullName.firstName || ''} ${newPatientData.fullName.lastName || ''}`.trim()
+        : `${formData.firstName.trim()} ${formData.lastName.trim()}`.trim();
+      const phone = newPatientData?.phone || formData.phone.trim() || '';
+
+      setRegisteredPatientSuccess({
+        patientId,
+        profileId,
+        claimCode,
+        fullName,
+        rawFullName: newPatientData?.fullName,
+        phone
+      });
+
+      // Clear the form fields for next registration
+      setFormData({
+        firstName: '',
+        lastName: '',
+        phone: '',
+        gender: 'female',
+        dateOfBirth: '',
+        village: '',
+        district: '',
+        state: '',
+        diabetesStatus: 'yes',
+        diabetesDuration: ''
+      });
+
+      // Reload patients table so the newly enrolled patient is present in background
+      loadPatients();
     } catch (err) {
       console.error('Registration failed:', err);
       setRegError(err.message || 'Failed to register patient');
@@ -406,16 +497,135 @@ export default function HealthcareWorkerDashboard() {
               <div>
                 <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">Outreach Camp Registration</span>
                 <h3 className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">
-                  Enroll New Field Patient
+                  {registeredPatientSuccess ? 'Patient Registration Slip' : 'Enroll New Field Patient'}
                 </h3>
               </div>
               <button
-                onClick={() => setShowRegisterModal(false)}
-                className="w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center transition-all"
+                type="button"
+                onClick={closeRegisterModal}
+                className="w-8 h-8 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center transition-all cursor-pointer"
+                aria-label="Close modal"
               >
                 ✕
               </button>
             </div>
+
+            {registeredPatientSuccess ? (
+              <div className="p-5 sm:p-6 space-y-4">
+                {/* Header status */}
+                <div className="flex items-center gap-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-emerald-950">Patient Enrolled Successfully</h4>
+                    <p className="text-xs text-emerald-700">Issue these registration credentials on the physical camp slip.</p>
+                  </div>
+                </div>
+
+                {/* Patient Summary Card */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Patient Name</span>
+                    <span className="text-sm font-bold text-slate-900">{registeredPatientSuccess.fullName}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Assigned Patient ID</span>
+                    <span className="text-sm font-mono font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded border border-emerald-200">
+                      {registeredPatientSuccess.patientId || 'Pending'}
+                    </span>
+                  </div>
+                  {registeredPatientSuccess.phone && (
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Contact Phone</span>
+                      <span className="text-xs text-slate-700 font-medium">{registeredPatientSuccess.phone}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* One-Time Claim Code Box */}
+                {registeredPatientSuccess.claimCode ? (
+                  <div className="border-2 border-dashed border-emerald-300 bg-emerald-50/60 rounded-2xl p-4 sm:p-5 text-center space-y-3">
+                    <div>
+                      <span className="inline-block text-[11px] font-bold text-emerald-800 uppercase tracking-wider bg-emerald-100 px-2.5 py-0.5 rounded-full mb-1">
+                        One-Time Claim Code
+                      </span>
+                      <div className="flex items-center justify-center gap-3 mt-1.5 flex-wrap">
+                        <span className="text-2xl sm:text-3xl font-mono font-black text-slate-900 tracking-widest bg-white px-4 py-1.5 rounded-xl border border-emerald-200 shadow-2xs">
+                          {registeredPatientSuccess.claimCode}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyClaimCode(registeredPatientSuccess.claimCode)}
+                          className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer ${
+                            copiedClaimCode
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-white hover:bg-slate-100 text-slate-800 border border-slate-300'
+                          }`}
+                          title="Copy Claim Code"
+                        >
+                          {copiedClaimCode ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-white" />
+                              <span>Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5 text-slate-600" />
+                              <span>Copy Code</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {copyError && (
+                      <p className="text-xs text-amber-700 font-medium">
+                        Clipboard copy failed. Please write the claim code down manually.
+                      </p>
+                    )}
+
+                    <div className="text-left bg-blue-50 border border-blue-200 rounded-xl p-3 flex gap-2.5">
+                      <FileText className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                      <p className="text-xs text-blue-900 leading-relaxed">
+                        <strong>Patient Slip Instruction:</strong> Write or stamp this Claim Code on the patient's card.
+                        The patient requires both their <strong>Patient ID ({registeredPatientSuccess.patientId})</strong> and
+                        this <strong>Claim Code</strong> to claim their medical record and view screening history online.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-amber-900 text-xs">
+                    <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Claim code not returned by server</p>
+                      <p className="mt-0.5 text-amber-800 leading-relaxed">
+                        The patient record was created with ID <strong>{registeredPatientSuccess.patientId}</strong>, but the one-time claim code was not returned in the API response. Contact camp administration to issue or reset the patient claim code through the approved recovery workflow.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Modal Actions */}
+                <div className="pt-2 flex flex-col sm:flex-row items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={closeRegisterModal}
+                    className="w-full sm:w-1/2 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-all text-center cursor-pointer"
+                  >
+                    Done / Back to Roster
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStartScreeningForNewPatient}
+                    className="w-full sm:w-1/2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Camera className="w-4 h-4" />
+                    Screen Fundus Now
+                  </button>
+                </div>
+              </div>
+            ) : (
 
             <form onSubmit={handleRegisterPatient} className="p-5 sm:p-6 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -572,21 +782,22 @@ export default function HealthcareWorkerDashboard() {
               <div className="pt-2 flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowRegisterModal(false)}
-                  className="flex-1 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-all"
+                  onClick={closeRegisterModal}
+                  className="flex-1 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={registering}
-                  className="flex-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5"
+                  className="flex-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <UserPlus className="w-4 h-4" />
                   {registering ? 'Enrolling Patient...' : 'Enroll & Generate Login ID'}
                 </button>
               </div>
             </form>
+            )}
           </div>
         </div>
       )}
