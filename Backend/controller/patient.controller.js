@@ -191,6 +191,10 @@ async function registerFieldPatient(req, res) {
   });
 }
 
+// Generic claim failure message to prevent patient record enumeration (SEC-02)
+const GENERIC_CLAIM_FAILURE_MESSAGE = 'Unable to claim this patient record. Verify the supplied details or contact support.';
+const DUMMY_CLAIM_HASH = '$2b$10$SdUzyke21JUzXTzVDqzvCerVPYkP/M3r97kMQoNiMEFmPvyP3efvu';
+
 /**
  * POST /api/patients/claim
  * Allows an authenticated patient to claim an existing outreach/field patient record
@@ -226,12 +230,27 @@ async function claimPatientRecord(req, res) {
     userId: null
   }).select('+claimCodeHash');
 
-  if (!targetProfile) {
-    throw new AppError('No unclaimed patient record found with the specified Patient ID', 404);
-  }
+  if (!targetProfile || !targetProfile.claimCodeHash) {
+    // Constant-time mitigation: perform dummy bcrypt check to prevent timing-based enumeration
+    await bcrypt.compare(claimCode.trim(), DUMMY_CLAIM_HASH).catch(() => {});
 
-  if (!targetProfile.claimCodeHash) {
-    throw new AppError('This record cannot be claimed online. Please contact camp administration.', 400);
+    try {
+      await AuditLog.create({
+        actorId: req.user._id,
+        action: 'PATIENT_CLAIM_FAILED',
+        targetId: req.user._id,
+        targetResource: 'PatientProfile',
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+        status: 'failed',
+        details: {
+          patientId: normalizedPatientId,
+          reason: !targetProfile ? 'record_not_found_or_claimed' : 'missing_claim_code'
+        }
+      });
+    } catch (_) {}
+
+    throw new AppError(GENERIC_CLAIM_FAILURE_MESSAGE, 400);
   }
 
   // 1. Verify claim code
@@ -240,16 +259,16 @@ async function claimPatientRecord(req, res) {
     try {
       await AuditLog.create({
         actorId: req.user._id,
-        action: 'PATIENT_CLAIM_FAILED_INVALID_CODE',
+        action: 'PATIENT_CLAIM_FAILED',
         targetId: req.user._id,
         targetResource: 'PatientProfile',
         ip: req.ip,
         userAgent: req.get('User-Agent'),
         status: 'failed',
-        details: { patientId: normalizedPatientId }
+        details: { patientId: normalizedPatientId, reason: 'invalid_claim_code' }
       });
     } catch (_) {}
-    throw new AppError('Identity verification failed. Invalid Claim Code.', 401);
+    throw new AppError(GENERIC_CLAIM_FAILURE_MESSAGE, 400);
   }
 
   // 2. Verify corroborating factor (phone or date of birth)
@@ -258,7 +277,19 @@ async function claimPatientRecord(req, res) {
     const rawTargetPhone = targetProfile.phone.replace(/\D/g, '');
     const rawInputPhone = (phone ? String(phone) : '').replace(/\D/g, '');
     if (!rawInputPhone || rawTargetPhone !== rawInputPhone) {
-      throw new AppError('Identity verification failed. Contact phone number does not match patient record.', 400);
+      try {
+        await AuditLog.create({
+          actorId: req.user._id,
+          action: 'PATIENT_CLAIM_FAILED',
+          targetId: req.user._id,
+          targetResource: 'PatientProfile',
+          ip: req.ip,
+          userAgent: req.get('User-Agent'),
+          status: 'failed',
+          details: { patientId: normalizedPatientId, reason: 'phone_mismatch' }
+        });
+      } catch (_) {}
+      throw new AppError(GENERIC_CLAIM_FAILURE_MESSAGE, 400);
     }
     corroborated = true;
   }
@@ -268,11 +299,35 @@ async function claimPatientRecord(req, res) {
       const targetDob = new Date(targetProfile.dateOfBirth).toISOString().slice(0, 10);
       const inputDob = new Date(dateOfBirth).toISOString().slice(0, 10);
       if (targetDob !== inputDob) {
-        throw new AppError('Identity verification failed. Date of birth does not match patient record.', 400);
+        try {
+          await AuditLog.create({
+            actorId: req.user._id,
+            action: 'PATIENT_CLAIM_FAILED',
+            targetId: req.user._id,
+            targetResource: 'PatientProfile',
+            ip: req.ip,
+            userAgent: req.get('User-Agent'),
+            status: 'failed',
+            details: { patientId: normalizedPatientId, reason: 'dob_mismatch' }
+          });
+        } catch (_) {}
+        throw new AppError(GENERIC_CLAIM_FAILURE_MESSAGE, 400);
       }
       corroborated = true;
     } else if (!corroborated) {
-      throw new AppError('Identity verification failed. Date of birth is required to verify this record.', 400);
+      try {
+        await AuditLog.create({
+          actorId: req.user._id,
+          action: 'PATIENT_CLAIM_FAILED',
+          targetId: req.user._id,
+          targetResource: 'PatientProfile',
+          ip: req.ip,
+          userAgent: req.get('User-Agent'),
+          status: 'failed',
+          details: { patientId: normalizedPatientId, reason: 'missing_corroboration' }
+        });
+      } catch (_) {}
+      throw new AppError(GENERIC_CLAIM_FAILURE_MESSAGE, 400);
     }
   }
 
@@ -293,11 +348,23 @@ async function claimPatientRecord(req, res) {
         claimCodeHash: 1
       }
     },
-    { new: true }
+    { returnDocument: 'after' }
   );
 
   if (!claimedProfile) {
-    throw new AppError('This record has already been claimed or is being claimed concurrently', 409);
+    try {
+      await AuditLog.create({
+        actorId: req.user._id,
+        action: 'PATIENT_CLAIM_FAILED',
+        targetId: req.user._id,
+        targetResource: 'PatientProfile',
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+        status: 'failed',
+        details: { patientId: normalizedPatientId, reason: 'concurrent_claim_conflict' }
+      });
+    } catch (_) {}
+    throw new AppError(GENERIC_CLAIM_FAILURE_MESSAGE, 400);
   }
 
   // If caller had an empty initial placeholder profile without screenings, remove it

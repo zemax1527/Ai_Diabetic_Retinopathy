@@ -285,7 +285,29 @@ async function runPatientLifecycleTests() {
     createdUserIds.push(claimerUser._id);
     const claimerToken = claimerUser.generateAuthToken();
 
-    // Attempt 1: Claim with only Patient ID and wrong code
+    const GENERIC_CLAIM_FAILURE_MESSAGE = 'Unable to claim this patient record. Verify the supplied details or contact support.';
+
+    // Attempt 0: Nonexistent Patient ID
+    const nonexistentRes = await fetch(`${baseUrl}/api/patients/claim`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `token=${claimerToken}`
+      },
+      body: JSON.stringify({
+        patientId: 'PAT-9999-9999',
+        claimCode: 'CLM-UNKNOWN',
+        phone: '9876543210'
+      })
+    });
+    const nonexistentData = await nonexistentRes.json();
+    assert(
+      'Claiming nonexistent Patient ID returns generic failure (400)',
+      nonexistentRes.status === 400 && nonexistentData.message === GENERIC_CLAIM_FAILURE_MESSAGE,
+      `Status: ${nonexistentRes.status}, Message: "${nonexistentData.message}"`
+    );
+
+    // Attempt 1: Claim with Patient ID and wrong code
     const wrongCodeRes = await fetch(`${baseUrl}/api/patients/claim`, {
       method: 'POST',
       headers: {
@@ -298,9 +320,11 @@ async function runPatientLifecycleTests() {
         phone: '9876543210'
       })
     });
+    const wrongCodeData = await wrongCodeRes.json();
     assert(
-      'Claiming with wrong Claim Code is rejected with 401',
-      wrongCodeRes.status === 401
+      'Claiming with wrong Claim Code returns same generic failure (400)',
+      wrongCodeRes.status === 400 && wrongCodeData.message === GENERIC_CLAIM_FAILURE_MESSAGE,
+      `Status: ${wrongCodeRes.status}, Message: "${wrongCodeData.message}"`
     );
 
     // Attempt 2: Claim with correct code but wrong phone number
@@ -316,9 +340,27 @@ async function runPatientLifecycleTests() {
         phone: '1111111111'
       })
     });
+    const wrongPhoneData = await wrongPhoneRes.json();
     assert(
-      'Claiming with mismatched contact phone is rejected with 400',
-      wrongPhoneRes.status === 400
+      'Claiming with mismatched contact phone returns same generic failure (400)',
+      wrongPhoneRes.status === 400 && wrongPhoneData.message === GENERIC_CLAIM_FAILURE_MESSAGE,
+      `Status: ${wrongPhoneRes.status}, Message: "${wrongPhoneData.message}"`
+    );
+
+    // Attempt 2b: Patient ID alone cannot claim a record (missing claim code)
+    const idAloneRes = await fetch(`${baseUrl}/api/patients/claim`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `token=${claimerToken}`
+      },
+      body: JSON.stringify({
+        patientId: fieldPatientId
+      })
+    });
+    assert(
+      'Patient ID alone cannot claim a record (HTTP 400 rejection)',
+      idAloneRes.status === 400
     );
 
     // -------------------------------------------------------------
@@ -344,7 +386,7 @@ async function runPatientLifecycleTests() {
       validClaimRes.status === 200 && validClaimData.success === true
     );
 
-    // Attempt duplicate claim by another account
+    // Attempt duplicate claim by another account on already-claimed record
     const secondClaimer = await userModel.create({
       fullName: { firstName: 'Intruder', lastName: 'X' },
       email: `intruder_${suffix}@test.com`,
@@ -368,9 +410,11 @@ async function runPatientLifecycleTests() {
         phone: '9876543210'
       })
     });
+    const secondClaimData = await secondClaimRes.json();
     assert(
-      'Subsequent or duplicate claim of an already claimed record is rejected (404/409)',
-      secondClaimRes.status === 404 || secondClaimRes.status === 409
+      'Subsequent claim of already claimed record returns same generic failure (400)',
+      secondClaimRes.status === 400 && secondClaimData.message === GENERIC_CLAIM_FAILURE_MESSAGE,
+      `Status: ${secondClaimRes.status}, Message: "${secondClaimData.message}"`
     );
 
     // -------------------------------------------------------------
