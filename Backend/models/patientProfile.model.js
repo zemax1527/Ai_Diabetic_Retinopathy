@@ -7,8 +7,10 @@ const patientProfileSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    unique: true,
-    sparse: true,
+    index: {
+      unique: true,
+      partialFilterExpression: { userId: { $type: 'objectId' } }
+    },
     default: null
   },
 

@@ -26,6 +26,103 @@ import DashboardShell from '../../components/dashboard/DashboardShell';
 import PatientScreeningFlow from '../../components/patient/screening/PatientScreeningFlow';
 import { registerFieldPatient, fetchFieldPatients, syncScreeningToBackend } from '../../api/screenings';
 
+// SEC-05: Patient roster shape normalizers
+// Ensures frontend safely handles direct PatientProfile documents (GET /api/patients),
+// field patients without user accounts (userId = null), and claimed/linked patients (populated userId).
+function getPatientFullName(item) {
+  if (!item) return 'Patient';
+  if (typeof item.fullName === 'string' && item.fullName.trim()) {
+    return item.fullName.trim();
+  }
+  if (item.fullName && typeof item.fullName === 'object') {
+    const fn = `${item.fullName.firstName || ''} ${item.fullName.lastName || ''}`.trim();
+    if (fn) return fn;
+  }
+  if (typeof item.name === 'string' && item.name.trim()) {
+    return item.name.trim();
+  }
+  if (item.userId && typeof item.userId === 'object') {
+    if (typeof item.userId.fullName === 'string' && item.userId.fullName.trim()) {
+      return item.userId.fullName.trim();
+    }
+    if (item.userId.fullName && typeof item.userId.fullName === 'object') {
+      const fn = `${item.userId.fullName.firstName || ''} ${item.userId.fullName.lastName || ''}`.trim();
+      if (fn) return fn;
+    }
+    if (typeof item.userId.name === 'string' && item.userId.name.trim()) {
+      return item.userId.name.trim();
+    }
+  }
+  if (item.profile) {
+    if (typeof item.profile.fullName === 'string' && item.profile.fullName.trim()) {
+      return item.profile.fullName.trim();
+    }
+    if (item.profile.fullName && typeof item.profile.fullName === 'object') {
+      const fn = `${item.profile.fullName.firstName || ''} ${item.profile.fullName.lastName || ''}`.trim();
+      if (fn) return fn;
+    }
+  }
+  if (item.user) {
+    if (typeof item.user.fullName === 'string' && item.user.fullName.trim()) {
+      return item.user.fullName.trim();
+    }
+    if (item.user.fullName && typeof item.user.fullName === 'object') {
+      const fn = `${item.user.fullName.firstName || ''} ${item.user.fullName.lastName || ''}`.trim();
+      if (fn) return fn;
+    }
+  }
+  return 'Patient';
+}
+
+function getPatientDisplayId(item) {
+  if (!item) return 'N/A';
+  if (item.patientId && typeof item.patientId === 'string') {
+    return item.patientId;
+  }
+  if (item.profile?.patientId && typeof item.profile.patientId === 'string') {
+    return item.profile.patientId;
+  }
+  if (item.userId && typeof item.userId === 'object' && item.userId.loginId) {
+    return item.userId.loginId;
+  }
+  if (item.user?.loginId) {
+    return item.user.loginId;
+  }
+  return 'N/A';
+}
+
+function isValidMongoId(id) {
+  if (!id) return false;
+  const str = String(id).trim();
+  // Reject human-readable patient codes (e.g., PAT-2026-0044)
+  if (str.startsWith('PAT-') || str.startsWith('HCW-') || str.startsWith('DOC-')) {
+    return false;
+  }
+  // MongoDB ObjectId is a 24-character hexadecimal string
+  return /^[0-9a-fA-F]{24}$/.test(str);
+}
+
+function getPatientProfileId(item) {
+  if (!item) return null;
+  // Strictly resolves the PatientProfile document ObjectId; never User._id or human-readable PAT-YYYY-####
+  if (item._id && isValidMongoId(item._id)) return String(item._id);
+  if (item.profileId && isValidMongoId(item.profileId)) return String(item.profileId);
+  if (item.profile?._id && isValidMongoId(item.profile._id)) return String(item.profile._id);
+  if (item.id && isValidMongoId(item.id)) return String(item.id);
+  return null;
+}
+
+function getPatientPhone(item) {
+  if (!item) return null;
+  return item.phone || (item.userId && typeof item.userId === 'object' ? item.userId.phone : null) || item.profile?.phone || item.user?.phone || null;
+}
+
+function formatPatientDob(dob) {
+  if (!dob) return null;
+  const d = new Date(dob);
+  return isNaN(d.getTime()) ? null : d.toLocaleDateString();
+}
+
 export default function HealthcareWorkerDashboard() {
   const { user } = useAuth();
 
@@ -234,13 +331,12 @@ export default function HealthcareWorkerDashboard() {
 
     // Save to backend with assisted patient ID and healthcare worker context.
     // For field patients (no user account) and registered patients, target PatientProfile ID is the primary identifier.
-    const targetPatientId =
-      assistedPatient?._id ||
-      assistedPatient?.profileId ||
-      assistedPatient?.patientId ||
-      assistedPatient?.profile?._id ||
-      assistedPatient?.user?._id ||
-      assistedPatient?.id;
+    const targetPatientId = getPatientProfileId(assistedPatient);
+    if (!targetPatientId) {
+      console.error('Assisted screening aborted: Unable to resolve a valid PatientProfile ObjectId for patient.', assistedPatient);
+      alert('Unable to submit screening: Patient profile record ID could not be identified. Please select the patient from the roster and retry.');
+      return;
+    }
 
     try {
       await syncScreeningToBackend(screeningResult, targetPatientId);
@@ -251,21 +347,9 @@ export default function HealthcareWorkerDashboard() {
 
   // If Healthcare Worker is running an assisted screening flow:
   if (activeView === 'screening' && assistedPatient) {
-    const assistedPatientName =
-      `${assistedPatient.fullName?.firstName || assistedPatient.profile?.fullName?.firstName || assistedPatient.user?.fullName?.firstName || assistedPatient.userId?.fullName?.firstName || ''} ${assistedPatient.fullName?.lastName || assistedPatient.profile?.fullName?.lastName || assistedPatient.user?.fullName?.lastName || assistedPatient.userId?.fullName?.lastName || ''}`.trim() || 'Patient';
-    const assistedPatientId =
-      assistedPatient.patientId ||
-      assistedPatient.profile?.patientId ||
-      assistedPatient.user?.loginId ||
-      assistedPatient.userId?.loginId ||
-      'ID';
-    const assistedProfileId =
-      assistedPatient._id ||
-      assistedPatient.profileId ||
-      assistedPatient.profile?._id ||
-      assistedPatient.user?._id ||
-      assistedPatient.userId?._id ||
-      assistedPatient.id;
+    const assistedPatientName = getPatientFullName(assistedPatient);
+    const assistedPatientId = getPatientDisplayId(assistedPatient);
+    const assistedProfileId = getPatientProfileId(assistedPatient);
 
     return (
       <DashboardShell
@@ -289,26 +373,47 @@ export default function HealthcareWorkerDashboard() {
           </button>
         </div>
 
-        <PatientScreeningFlow
-          currentUser={{
-            id: assistedProfileId,
-            profileId: assistedProfileId,
-            patientId: assistedPatientId,
-            loginId: assistedPatientId,
-            name: assistedPatientName
-          }}
-          onScreeningCompleted={handleAssistedScreeningCompleted}
-          onBackToDashboard={() => {
-            setActiveView('queue');
-            setAssistedPatient(null);
-            loadPatients();
-          }}
-          onRequestDoctorReview={() => {
-            setActiveView('queue');
-            setAssistedPatient(null);
-            loadPatients();
-          }}
-        />
+        {!assistedProfileId ? (
+          <div className="p-6 bg-amber-50 border border-amber-200 rounded-2xl text-center space-y-3">
+            <p className="text-sm font-semibold text-amber-900">
+              Unable to resolve a valid PatientProfile record ID for this patient.
+            </p>
+            <p className="text-xs text-amber-700">
+              Screening cannot be linked without a verified patient record. Please return to the camp roster and re-select the patient.
+            </p>
+            <button
+              onClick={() => {
+                setActiveView('queue');
+                setAssistedPatient(null);
+                loadPatients();
+              }}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold cursor-pointer"
+            >
+              Back to Camp Roster
+            </button>
+          </div>
+        ) : (
+          <PatientScreeningFlow
+            currentUser={{
+              id: assistedProfileId,
+              profileId: assistedProfileId,
+              patientId: assistedPatientId,
+              loginId: assistedPatientId,
+              name: assistedPatientName
+            }}
+            onScreeningCompleted={handleAssistedScreeningCompleted}
+            onBackToDashboard={() => {
+              setActiveView('queue');
+              setAssistedPatient(null);
+              loadPatients();
+            }}
+            onRequestDoctorReview={() => {
+              setActiveView('queue');
+              setAssistedPatient(null);
+              loadPatients();
+            }}
+          />
+        )}
       </DashboardShell>
     );
   }
@@ -415,7 +520,7 @@ export default function HealthcareWorkerDashboard() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                  <th className="py-3 px-4">Login ID</th>
+                  <th className="py-3 px-4">Patient ID</th>
                   <th className="py-3 px-4">Patient Name</th>
                   <th className="py-3 px-4">Demographics</th>
                   <th className="py-3 px-4">Location</th>
@@ -425,47 +530,53 @@ export default function HealthcareWorkerDashboard() {
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
                 {patients.map((item) => {
-                  const pUser = item.user || item.userId;
-                  const pProfile = item.profile || item;
-                  const firstName = item.fullName?.firstName || pProfile?.fullName?.firstName || pUser?.fullName?.firstName || '';
-                  const lastName = item.fullName?.lastName || pProfile?.fullName?.lastName || pUser?.fullName?.lastName || '';
-                  const fullName = `${firstName} ${lastName}`.trim() || 'Patient';
-                  const displayLoginId = item.patientId || pProfile?.patientId || pUser?.loginId || 'PAT-LOCAL';
-                  const rowKey = item._id || pProfile?._id || pUser?._id || displayLoginId;
+                  const fullName = getPatientFullName(item);
+                  const displayPatientId = getPatientDisplayId(item);
+                  const profileId = getPatientProfileId(item);
+                  const phone = getPatientPhone(item);
+                  const dobFormatted = formatPatientDob(item.dateOfBirth || item.profile?.dateOfBirth);
+                  const gender = item.gender || item.profile?.gender || 'N/A';
+                  const village = item.address?.village || item.profile?.address?.village || '';
+                  const district = item.address?.district || item.profile?.address?.district || 'Rural Center';
+                  const diabetesStatus = item.diabetesStatus || item.profile?.diabetesStatus || 'unknown';
+                  const isClaimed = item.claimStatus === 'claimed' || Boolean(item.userId && typeof item.userId === 'object');
+                  const rowKey = profileId || displayPatientId;
 
                   return (
                     <tr key={rowKey} className="hover:bg-emerald-50/40 transition-colors">
-                      <td className="py-3.5 px-4 font-mono font-medium text-emerald-700">
-                        {displayLoginId}
+                      <td className="py-3.5 px-4">
+                        <div className="font-mono font-medium text-emerald-700">{displayPatientId}</div>
+                        <div className="text-[10px] font-medium text-slate-400">
+                          {isClaimed ? 'Claimed Account' : 'Field Outreach'}
+                        </div>
                       </td>
                       <td className="py-3.5 px-4 font-semibold text-slate-900">
                         {fullName}
-                        {(pProfile?.phone || item.phone) && (
+                        {phone && (
                           <div className="text-[11px] font-normal text-slate-500 flex items-center gap-1 mt-0.5">
                             <Phone className="w-3 h-3 text-slate-400" />
-                            {pProfile?.phone || item.phone}
+                            {phone}
                           </div>
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-slate-600">
-                        <span className="capitalize">{pProfile?.gender || item.gender || 'N/A'}</span>
-                        {(pProfile?.dateOfBirth || item.dateOfBirth) && (
+                        <span className="capitalize">{gender}</span>
+                        {dobFormatted && (
                           <span className="text-slate-400 ml-1 text-xs">
-                            (DOB: {new Date(pProfile?.dateOfBirth || item.dateOfBirth).toLocaleDateString()})
+                            (DOB: {dobFormatted})
                           </span>
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-slate-600">
-                        {(pProfile?.address?.village || item.address?.village) ? `${pProfile?.address?.village || item.address?.village}, ` : ''}
-                        {pProfile?.address?.district || item.address?.district || 'Rural Center'}
+                        {village ? `${village}, ` : ''}{district}
                       </td>
                       <td className="py-3.5 px-4">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-                          (pProfile?.diabetesStatus || item.diabetesStatus) === 'yes'
+                          diabetesStatus === 'yes'
                             ? 'bg-amber-100 text-amber-800'
                             : 'bg-slate-100 text-slate-700'
                         }`}>
-                          {(pProfile?.diabetesStatus || item.diabetesStatus) === 'yes' ? 'Diabetic' : 'Unknown / Non-diabetic'}
+                          {diabetesStatus === 'yes' ? 'Diabetic' : 'Unknown / Non-diabetic'}
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right">
@@ -474,7 +585,7 @@ export default function HealthcareWorkerDashboard() {
                             setAssistedPatient(item);
                             setActiveView('screening');
                           }}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-2xs transition-all inline-flex items-center gap-1.5"
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-2xs transition-all inline-flex items-center gap-1.5 cursor-pointer"
                         >
                           <Camera className="w-3.5 h-3.5" />
                           Screen Fundus
