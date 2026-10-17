@@ -110,7 +110,7 @@ export default function HealthcareWorkerDashboard() {
       const res = await registerFieldPatient(payload);
       const newPatientData = res?.data;
 
-      setRegSuccess(`Patient enrolled! Assigned Login ID: ${newPatientData?.user?.loginId || 'GENERATED'}`);
+      setRegSuccess(`Patient enrolled! Assigned Login ID: ${newPatientData?.patientId || newPatientData?.user?.loginId || 'GENERATED'}`);
       
       setTimeout(() => {
         setShowRegisterModal(false);
@@ -141,9 +141,18 @@ export default function HealthcareWorkerDashboard() {
   async function handleAssistedScreeningCompleted(screeningResult) {
     setCompletedResult(screeningResult);
 
-    // Save to backend with assisted patient ID and healthcare worker context
+    // Save to backend with assisted patient ID and healthcare worker context.
+    // For field patients (no user account) and registered patients, target PatientProfile ID is the primary identifier.
+    const targetPatientId =
+      assistedPatient?._id ||
+      assistedPatient?.profileId ||
+      assistedPatient?.patientId ||
+      assistedPatient?.profile?._id ||
+      assistedPatient?.user?._id ||
+      assistedPatient?.id;
+
     try {
-      await syncScreeningToBackend(screeningResult, assistedPatient?.user?._id || assistedPatient?.id);
+      await syncScreeningToBackend(screeningResult, targetPatientId);
     } catch (err) {
       console.error('Failed to sync assisted screening:', err);
     }
@@ -151,10 +160,26 @@ export default function HealthcareWorkerDashboard() {
 
   // If Healthcare Worker is running an assisted screening flow:
   if (activeView === 'screening' && assistedPatient) {
+    const assistedPatientName =
+      `${assistedPatient.fullName?.firstName || assistedPatient.profile?.fullName?.firstName || assistedPatient.user?.fullName?.firstName || assistedPatient.userId?.fullName?.firstName || ''} ${assistedPatient.fullName?.lastName || assistedPatient.profile?.fullName?.lastName || assistedPatient.user?.fullName?.lastName || assistedPatient.userId?.fullName?.lastName || ''}`.trim() || 'Patient';
+    const assistedPatientId =
+      assistedPatient.patientId ||
+      assistedPatient.profile?.patientId ||
+      assistedPatient.user?.loginId ||
+      assistedPatient.userId?.loginId ||
+      'ID';
+    const assistedProfileId =
+      assistedPatient._id ||
+      assistedPatient.profileId ||
+      assistedPatient.profile?._id ||
+      assistedPatient.user?._id ||
+      assistedPatient.userId?._id ||
+      assistedPatient.id;
+
     return (
       <DashboardShell
         title="Assisted Field Screening"
-        subtitle={`Screening for: ${assistedPatient.user?.fullName?.firstName || 'Patient'} (${assistedPatient.user?.loginId || 'ID'})`}
+        subtitle={`Screening for: ${assistedPatientName} (${assistedPatientId})`}
       >
         <div className="mb-4 flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl p-3">
           <div className="flex items-center gap-2 text-xs text-blue-900 font-semibold">
@@ -175,9 +200,11 @@ export default function HealthcareWorkerDashboard() {
 
         <PatientScreeningFlow
           currentUser={{
-            id: assistedPatient.user?._id || assistedPatient.user?.id,
-            loginId: assistedPatient.user?.loginId,
-            name: `${assistedPatient.user?.fullName?.firstName || ''} ${assistedPatient.user?.fullName?.lastName || ''}`.trim()
+            id: assistedProfileId,
+            profileId: assistedProfileId,
+            patientId: assistedPatientId,
+            loginId: assistedPatientId,
+            name: assistedPatientName
           }}
           onScreeningCompleted={handleAssistedScreeningCompleted}
           onBackToDashboard={() => {
@@ -307,43 +334,47 @@ export default function HealthcareWorkerDashboard() {
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs sm:text-sm">
                 {patients.map((item) => {
-                  const pUser = item.user;
-                  const pProfile = item.profile;
-                  const fullName = `${pUser?.fullName?.firstName || ''} ${pUser?.fullName?.lastName || ''}`.trim() || 'Patient';
+                  const pUser = item.user || item.userId;
+                  const pProfile = item.profile || item;
+                  const firstName = item.fullName?.firstName || pProfile?.fullName?.firstName || pUser?.fullName?.firstName || '';
+                  const lastName = item.fullName?.lastName || pProfile?.fullName?.lastName || pUser?.fullName?.lastName || '';
+                  const fullName = `${firstName} ${lastName}`.trim() || 'Patient';
+                  const displayLoginId = item.patientId || pProfile?.patientId || pUser?.loginId || 'PAT-LOCAL';
+                  const rowKey = item._id || pProfile?._id || pUser?._id || displayLoginId;
 
                   return (
-                    <tr key={pUser?._id} className="hover:bg-emerald-50/40 transition-colors">
+                    <tr key={rowKey} className="hover:bg-emerald-50/40 transition-colors">
                       <td className="py-3.5 px-4 font-mono font-medium text-emerald-700">
-                        {pUser?.loginId || 'PAT-LOCAL'}
+                        {displayLoginId}
                       </td>
                       <td className="py-3.5 px-4 font-semibold text-slate-900">
                         {fullName}
-                        {pProfile?.phone && (
+                        {(pProfile?.phone || item.phone) && (
                           <div className="text-[11px] font-normal text-slate-500 flex items-center gap-1 mt-0.5">
                             <Phone className="w-3 h-3 text-slate-400" />
-                            {pProfile.phone}
+                            {pProfile?.phone || item.phone}
                           </div>
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-slate-600">
-                        <span className="capitalize">{pProfile?.gender || 'N/A'}</span>
-                        {pProfile?.dateOfBirth && (
+                        <span className="capitalize">{pProfile?.gender || item.gender || 'N/A'}</span>
+                        {(pProfile?.dateOfBirth || item.dateOfBirth) && (
                           <span className="text-slate-400 ml-1 text-xs">
-                            (DOB: {new Date(pProfile.dateOfBirth).toLocaleDateString()})
+                            (DOB: {new Date(pProfile?.dateOfBirth || item.dateOfBirth).toLocaleDateString()})
                           </span>
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-slate-600">
-                        {pProfile?.address?.village ? `${pProfile.address.village}, ` : ''}
-                        {pProfile?.address?.district || 'Rural Center'}
+                        {(pProfile?.address?.village || item.address?.village) ? `${pProfile?.address?.village || item.address?.village}, ` : ''}
+                        {pProfile?.address?.district || item.address?.district || 'Rural Center'}
                       </td>
                       <td className="py-3.5 px-4">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-                          pProfile?.diabetesStatus === 'yes'
+                          (pProfile?.diabetesStatus || item.diabetesStatus) === 'yes'
                             ? 'bg-amber-100 text-amber-800'
                             : 'bg-slate-100 text-slate-700'
                         }`}>
-                          {pProfile?.diabetesStatus === 'yes' ? 'Diabetic' : 'Unknown / Non-diabetic'}
+                          {(pProfile?.diabetesStatus || item.diabetesStatus) === 'yes' ? 'Diabetic' : 'Unknown / Non-diabetic'}
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right">

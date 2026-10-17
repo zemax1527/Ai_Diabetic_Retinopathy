@@ -190,6 +190,145 @@ async function runPatientLifecycleTests() {
       `conductedBy: ${assistedScreeningDoc.conductedBy}`
     );
 
+    // Test assisted screening using PatientProfile._id (direct profile identifier sent by frontend)
+    const profileIdSyncRes = await fetch(`${baseUrl}/api/screenings/sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `token=${hcwToken}`
+      },
+      body: JSON.stringify({
+        patientId: fieldProfileId.toString(),
+        screeningData: {
+          id: `SCR-PROFILE-ID-${suffix}`,
+          classification: { grade: 1, label: 'Mild NPDR', confidence: '92%' },
+          decision: { decision: 'NON-REFERABLE', referable: false },
+          quality: { status: 'Good', score: 1 }
+        }
+      })
+    });
+    const profileIdSyncData = await profileIdSyncRes.json();
+    assert(
+      'HCW can submit assisted screening for field patient using PatientProfile._id (201)',
+      profileIdSyncRes.status === 201 && profileIdSyncData.success === true
+    );
+    if (profileIdSyncData.data?._id) createdScreeningIds.push(profileIdSyncData.data._id);
+
+    const profileIdScreeningDoc = await Screening.findById(profileIdSyncData.data?._id);
+    assert(
+      'Assisted screening using PatientProfile._id stores correct references (patientId = Profile._id, conductedBy = HCW, userId = null)',
+      profileIdScreeningDoc.patientId.toString() === fieldProfileId.toString() &&
+      profileIdScreeningDoc.conductedBy.toString() === hcwUser._id.toString() &&
+      profileIdScreeningDoc.screeningType === 'assisted' &&
+      profileIdScreeningDoc.userId === null
+    );
+
+    // -------------------------------------------------------------
+    // SEC-03 REGRESSION: Verify exact frontend roster selection mapping
+    // -------------------------------------------------------------
+    const rosterSearchRes = await fetch(`${baseUrl}/api/patients?search=${encodeURIComponent(fieldPatientId)}`, {
+      headers: { Cookie: `token=${hcwToken}` }
+    });
+    const rosterSearchData = await rosterSearchRes.json();
+    assert(
+      'HCW roster query (GET /api/patients) returns matching field patient profile',
+      rosterSearchRes.status === 200 && Array.isArray(rosterSearchData.data) && rosterSearchData.data.length > 0
+    );
+
+    const selectedRosterItem = rosterSearchData.data.find(p => p.patientId === fieldPatientId);
+    assert(
+      'Roster item contains PatientProfile._id and patientId',
+      selectedRosterItem && String(selectedRosterItem._id) === String(fieldProfileId) && selectedRosterItem.patientId === fieldPatientId
+    );
+
+    // Verify that the buggy legacy frontend mapping fails (undefined) on field patients
+    const legacyBuggyMapping = selectedRosterItem?.user?._id || selectedRosterItem?.id;
+    assert(
+      'SEC-03 verification: Legacy frontend mapping (user?._id || id) evaluates to undefined for field patients',
+      legacyBuggyMapping === undefined
+    );
+
+    // Verify that the fixed SEC-03 frontend mapping resolves to the PatientProfile identifier
+    const frontendResolvedTargetId =
+      selectedRosterItem?._id ||
+      selectedRosterItem?.profileId ||
+      selectedRosterItem?.patientId ||
+      selectedRosterItem?.profile?._id ||
+      selectedRosterItem?.user?._id ||
+      selectedRosterItem?.id;
+
+    assert(
+      'SEC-03 verification: Fixed frontend mapping resolves to valid PatientProfile._id',
+      String(frontendResolvedTargetId) === String(fieldProfileId)
+    );
+
+    // Submit assisted screening using the exact frontend-resolved identifier
+    const frontendSyncRes = await fetch(`${baseUrl}/api/screenings/sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `token=${hcwToken}`
+      },
+      body: JSON.stringify({
+        patientId: frontendResolvedTargetId,
+        screeningData: {
+          id: `SCR-FE-RESOLVED-${suffix}`,
+          classification: { grade: 2, label: 'Moderate DR', confidence: '85%' },
+          decision: { decision: 'REFERABLE', referable: true, reason: 'Field camp check' },
+          quality: { status: 'Good', score: 1 }
+        }
+      })
+    });
+    const frontendSyncData = await frontendSyncRes.json();
+    assert(
+      'HCW assisted screening using frontend-resolved identifier succeeds (201)',
+      frontendSyncRes.status === 201 && frontendSyncData.success === true
+    );
+    if (frontendSyncData.data?._id) createdScreeningIds.push(frontendSyncData.data._id);
+
+    const frontendSyncScreeningDoc = await Screening.findById(frontendSyncData.data?._id);
+    assert(
+      'Assisted screening via frontend mapping persists patientId = fieldProfileId, conductedBy = HCW, userId = null',
+      frontendSyncScreeningDoc.patientId.toString() === fieldProfileId.toString() &&
+      frontendSyncScreeningDoc.conductedBy.toString() === hcwUser._id.toString() &&
+      frontendSyncScreeningDoc.userId === null &&
+      frontendSyncScreeningDoc.screeningType === 'assisted'
+    );
+
+    // Test assisted screening for a linked patient record with existing User account
+    const linkedPatProfile = await PatientProfile.findOne({ userId: selfPatUser._id });
+    const linkedSyncRes = await fetch(`${baseUrl}/api/screenings/sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: `token=${hcwToken}`
+      },
+      body: JSON.stringify({
+        patientId: linkedPatProfile._id.toString(),
+        screeningData: {
+          id: `SCR-LINKED-${suffix}`,
+          classification: { grade: 0, label: 'No DR', confidence: '95%' },
+          decision: { decision: 'NON-REFERABLE', referable: false },
+          quality: { status: 'Good', score: 1 }
+        }
+      })
+    });
+    const linkedSyncData = await linkedSyncRes.json();
+    assert(
+      'HCW can submit assisted screening for linked patient record (201)',
+      linkedSyncRes.status === 201 && linkedSyncData.success === true
+    );
+    if (linkedSyncData.data?._id) createdScreeningIds.push(linkedSyncData.data._id);
+
+    const linkedScreeningDoc = await Screening.findById(linkedSyncData.data?._id);
+    assert(
+      'Assisted screening for linked patient stores patientId=Profile._id, userId=User._id, conductedBy=HCW',
+      linkedScreeningDoc.patientId.toString() === linkedPatProfile._id.toString() &&
+      linkedScreeningDoc.userId.toString() === selfPatUser._id.toString() &&
+      linkedScreeningDoc.conductedBy.toString() === hcwUser._id.toString() &&
+      linkedScreeningDoc.screeningType === 'assisted'
+    );
+
     // -------------------------------------------------------------
     // REQUIREMENT 8, 9: Invalid patient ID & Non-patient rejection
     // -------------------------------------------------------------
