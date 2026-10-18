@@ -1,8 +1,67 @@
 import React, { useState } from 'react';
-import { User, Activity, Edit2, KeyRound, Save, X, CheckCircle2, ShieldCheck, Phone, Mail, MapPin } from 'lucide-react';
+import { Edit2, KeyRound, Save, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import Button from '../common/Button';
 import Modal from '../common/Modal';
 import { updatePatientProfile } from '../../../api/patient';
+
+function extractFormData(patient) {
+  let firstName = '';
+  let lastName = '';
+
+  if (patient?.fullName && typeof patient.fullName === 'object') {
+    firstName = patient.fullName.firstName || '';
+    lastName = patient.fullName.lastName || '';
+  } else if (typeof patient?.fullName === 'string') {
+    const parts = patient.fullName.trim().split(/\s+/);
+    firstName = parts[0] || '';
+    lastName = parts.slice(1).join(' ') || '';
+  } else {
+    firstName = patient?.firstName || '';
+    lastName = patient?.lastName || '';
+  }
+
+  const rawGender = (patient?.gender || patient?.personalDetails?.gender || 'Male').toLowerCase();
+  const gender = rawGender === 'female' ? 'Female' : rawGender === 'other' ? 'Other' : 'Male';
+
+  let dob = '1982-05-14';
+  if (patient?.dateOfBirth) {
+    try {
+      dob = new Date(patient.dateOfBirth).toISOString().split('T')[0];
+    } catch {
+      dob = '1982-05-14';
+    }
+  } else if (patient?.dob) {
+    dob = patient.dob;
+  }
+
+  let hasDiabetes = 'Yes';
+  if (patient?.diabetesStatus) {
+    if (patient.diabetesStatus === 'yes') hasDiabetes = 'Yes';
+    else if (patient.diabetesStatus === 'no') hasDiabetes = 'No';
+    else hasDiabetes = 'Pre-diabetic';
+  } else if (patient?.hasDiabetes) {
+    hasDiabetes = patient.hasDiabetes;
+  }
+
+  let diabetesDuration = '4 Years';
+  if (patient?.diabetesDuration !== undefined && patient?.diabetesDuration !== null) {
+    diabetesDuration = typeof patient.diabetesDuration === 'number'
+      ? `${patient.diabetesDuration} Years`
+      : String(patient.diabetesDuration);
+  }
+
+  return {
+    firstName,
+    lastName,
+    phone: patient?.phone || patient?.personalDetails?.phone || '',
+    gender,
+    dob,
+    hasDiabetes,
+    diabetesDuration,
+    village: patient?.address?.village || patient?.village || patient?.personalDetails?.village || '',
+    district: patient?.address?.district || patient?.district || patient?.personalDetails?.district || '',
+  };
+}
 
 export default function ProfileView({ patient, onProfileUpdated }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -12,51 +71,78 @@ export default function ProfileView({ patient, onProfileUpdated }) {
   const [errorMsg, setErrorMsg] = useState(null);
 
   // Form fields initialized with current patient profile
-  const [formData, setFormData] = useState({
-    firstName: patient?.firstName || patient?.fullName?.split(' ')[0] || '',
-    lastName: patient?.lastName || patient?.fullName?.split(' ')[1] || '',
-    phone: patient?.phone || patient?.personalDetails?.phone || '',
-    gender: patient?.gender || patient?.personalDetails?.gender || 'Male',
-    dob: patient?.dob || patient?.personalDetails?.dob || '1982-05-14',
-    hasDiabetes: patient?.hasDiabetes || patient?.personalDetails?.hasDiabetes || 'Yes',
-    diabetesDuration: patient?.diabetesDuration || '4 Years',
-    village: patient?.village || patient?.personalDetails?.village || '',
-    district: patient?.district || patient?.personalDetails?.district || '',
-  });
+  const [prevPatient, setPrevPatient] = useState(patient);
+  const [formData, setFormData] = useState(() => extractFormData(patient));
+
+  // Sync form data during render when patient prop updates externally and not editing
+  if (patient !== prevPatient) {
+    setPrevPatient(patient);
+    if (!isEditing) {
+      setFormData(extractFormData(patient));
+    }
+  }
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (saving) return;
     setSaving(true);
     setErrorMsg(null);
 
+    const durationNum = parseInt(String(formData.diabetesDuration).replace(/\D+/g, ''), 10);
+
+    const payload = {
+      fullName: {
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
+      },
+      phone: formData.phone.trim(),
+      gender: (formData.gender || 'other').toLowerCase(),
+      address: {
+        village: formData.village.trim(),
+        district: formData.district.trim(),
+        state: patient?.address?.state || 'Maharashtra',
+        pincode: patient?.address?.pincode || '',
+      },
+      diabetesStatus:
+        formData.hasDiabetes === 'Yes'
+          ? 'yes'
+          : formData.hasDiabetes === 'No'
+          ? 'no'
+          : 'unknown',
+      diabetesDuration: isNaN(durationNum) ? 0 : durationNum,
+    };
+
+    if (formData.dob) {
+      payload.dateOfBirth = formData.dob;
+    }
+
     try {
-      // Attempt backend update if active
-      await updatePatientProfile({
-        personalDetails: {
-          phone: formData.phone,
-          village: formData.village,
-          district: formData.district,
-          hasDiabetes: formData.hasDiabetes,
-          gender: formData.gender,
-        },
-      });
-    } catch (err) {
-      // Non-blocking fallback for frontend demo state
-      console.warn('Backend profile update note:', err?.message);
-    } finally {
-      setSaving(false);
-      setIsEditing(false);
+      const res = await updatePatientProfile(payload);
+      const updatedProfile = res?.data || res;
       setSaveSuccess(true);
+      setIsEditing(false);
       if (onProfileUpdated) {
+        const combinedFullName = `${formData.firstName} ${formData.lastName}`.trim();
         onProfileUpdated({
           ...patient,
-          ...formData,
-          fullName: `${formData.firstName} ${formData.lastName}`.trim(),
+          ...updatedProfile,
+          fullName: combinedFullName || updatedProfile?.fullName || patient?.fullName,
+          name: combinedFullName || patient?.name,
         });
       }
       setTimeout(() => setSaveSuccess(false), 4000);
+    } catch (err) {
+      console.error('Failed to update patient profile:', err);
+      setErrorMsg(err?.message || 'Failed to update profile. Please check your inputs and try again.');
+    } finally {
+      setSaving(false);
     }
   };
+
+  const displayName = typeof patient?.fullName === 'object'
+    ? `${patient.fullName.firstName || ''} ${patient.fullName.lastName || ''}`.trim()
+    : (patient?.fullName || `${formData.firstName} ${formData.lastName}`.trim() || 'Patient');
+  const avatarInitial = (displayName || 'P').charAt(0).toUpperCase();
 
   return (
     <div className="max-w-4xl mx-auto space-y-5 animate-in fade-in duration-200">
@@ -74,7 +160,10 @@ export default function ProfileView({ patient, onProfileUpdated }) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIsEditing(true)}
+              onClick={() => {
+                setErrorMsg(null);
+                setIsEditing(true);
+              }}
               icon={Edit2}
             >
               Edit Profile
@@ -83,7 +172,11 @@ export default function ProfileView({ patient, onProfileUpdated }) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setIsEditing(false)}
+              onClick={() => {
+                setIsEditing(false);
+                setErrorMsg(null);
+                setFormData(extractFormData(patient));
+              }}
               icon={X}
             >
               Cancel
@@ -101,6 +194,13 @@ export default function ProfileView({ patient, onProfileUpdated }) {
         </div>
       </div>
 
+      {errorMsg && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-xs sm:text-sm font-semibold text-rose-800 flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
       {saveSuccess && (
         <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs sm:text-sm font-semibold text-emerald-800 flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -113,14 +213,14 @@ export default function ProfileView({ patient, onProfileUpdated }) {
         {/* Header with avatar & ID */}
         <div className="flex items-center gap-4 border-b border-slate-100 pb-6">
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#0E2F76] to-[#2563EB] text-white flex items-center justify-center font-bold text-2xl shadow-sm">
-            {(patient?.fullName || patient?.firstName || 'P').charAt(0).toUpperCase()}
+            {avatarInitial}
           </div>
           <div>
             <h3 className="text-lg sm:text-xl font-bold text-[#0D1B3E]">
-              {patient?.fullName || `${formData.firstName} ${formData.lastName}`}
+              {displayName}
             </h3>
             <p className="text-xs text-[#718096] flex items-center gap-2 mt-0.5">
-              <span>Patient ID: <strong className="font-mono text-[#0E2F76]">{patient?.id || 'DR-PAT-2026-0042'}</strong></span>
+              <span>Patient ID: <strong className="font-mono text-[#0E2F76]">{patient?.patientId || patient?.id || 'DR-PAT-2026-0042'}</strong></span>
               <span>•</span>
               <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[11px] font-semibold">
                 Verified Patient
@@ -227,7 +327,16 @@ export default function ProfileView({ patient, onProfileUpdated }) {
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
-              <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  setIsEditing(false);
+                  setErrorMsg(null);
+                  setFormData(extractFormData(patient));
+                }}
+              >
                 Cancel
               </Button>
               <Button variant="primary" size="sm" type="submit" loading={saving} icon={Save}>

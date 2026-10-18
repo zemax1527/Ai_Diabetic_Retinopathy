@@ -10,13 +10,14 @@ const AppError = require('../utils/app.error');
 
 // Allowed fields a patient can update on their own profile
 const ALLOWED_UPDATE_FIELDS = [
+  'fullName',
   'dateOfBirth',
   'gender',
   'phone',
   'address',
   'diabetesStatus',
   'diabetesDuration'
-];
+]
 
 /**
  * GET /api/patients/me
@@ -27,25 +28,25 @@ async function getMyProfile(req, res) {
     userId: req.user._id
   })
     .populate('userId', 'fullName email loginId role isActive isProfileComplete')
-    .populate('registeredBy', 'fullName email loginId role');
+    .populate('registeredBy', 'fullName email loginId role')
 
   if (!patientProfile && req.user.loginId) {
     patientProfile = await PatientProfile.findOne({
       patientId: req.user.loginId
     })
       .populate('userId', 'fullName email loginId role isActive isProfileComplete')
-      .populate('registeredBy', 'fullName email loginId role');
+      .populate('registeredBy', 'fullName email loginId role')
   }
 
   if (!patientProfile) {
-    throw new AppError('Patient profile not found', 404);
+    throw new AppError('Patient profile not found', 404)
   }
 
   res.status(200).json({
     success: true,
     message: 'Patient profile fetched successfully',
     data: patientProfile
-  });
+  })
 }
 
 /**
@@ -53,16 +54,110 @@ async function getMyProfile(req, res) {
  * Update personal health details for the authenticated patient
  */
 async function updateMyProfile(req, res) {
-  const updates = {};
+  // Support canonical top-level fields as well as legacy nested personalDetails
+  const input = req.body && typeof req.body === 'object' ? req.body : {}
+  const personalDetails = input.personalDetails && typeof input.personalDetails === 'object'
+    ? input.personalDetails
+    : {}
+  const source = { ...personalDetails, ...input }
+
+  // Map legacy flattened location or status if address or diabetesStatus wasn't provided directly
+  if (!source.address && (source.village !== undefined || source.district !== undefined)) {
+    source.address = {
+      village: source.village,
+      district: source.district
+    }
+  }
+
+  if (source.diabetesStatus === undefined && source.hasDiabetes !== undefined) {
+    const dLower = String(source.hasDiabetes).toLowerCase()
+    source.diabetesStatus = dLower === 'yes' ? 'yes' : dLower === 'no' ? 'no' : 'unknown'
+  }
+
+  const updates = {}
 
   for (const field of ALLOWED_UPDATE_FIELDS) {
-    if (req.body[field] !== undefined) {
-      updates[field] = req.body[field];
+    if (source[field] !== undefined) {
+      updates[field] = source[field]
+    }
+  }
+
+  // Sanitize and validate fields
+  if (updates.fullName !== undefined) {
+    let firstName = ''
+    let lastName = ''
+    if (typeof updates.fullName === 'object' && updates.fullName !== null) {
+      firstName = String(updates.fullName.firstName || '').trim()
+      lastName = String(updates.fullName.lastName || '').trim()
+    } else if (typeof updates.fullName === 'string') {
+      const parts = updates.fullName.trim().split(/\s+/)
+      firstName = parts[0] || ''
+      lastName = parts.slice(1).join(' ') || ''
+    }
+    if (!firstName) {
+      throw new AppError('First name cannot be empty', 400)
+    }
+    updates.fullName = { firstName, lastName }
+  }
+
+  if (updates.gender !== undefined) {
+    const g = String(updates.gender).toLowerCase().trim()
+    if (['male', 'female', 'other'].includes(g)) {
+      updates.gender = g
+    } else {
+      throw new AppError('Invalid gender value. Allowed: male, female, other', 400)
+    }
+  }
+
+  if (updates.diabetesStatus !== undefined) {
+    const ds = String(updates.diabetesStatus).toLowerCase().trim()
+    if (['yes', 'no', 'unknown'].includes(ds)) {
+      updates.diabetesStatus = ds
+    } else {
+      updates.diabetesStatus = 'unknown'
+    }
+  }
+
+  if (updates.diabetesDuration !== undefined) {
+    if (updates.diabetesDuration === null || updates.diabetesDuration === '') {
+      updates.diabetesDuration = undefined
+    } else {
+      const parsed = Number(String(updates.diabetesDuration).replace(/[^\d.-]/g, ''))
+      if (isNaN(parsed) || parsed < 0) {
+        throw new AppError('Diabetes duration must be a non-negative number', 400)
+      }
+      updates.diabetesDuration = parsed
+    }
+  }
+
+  if (updates.dateOfBirth !== undefined) {
+    if (updates.dateOfBirth) {
+      const dob = new Date(updates.dateOfBirth)
+      if (isNaN(dob.getTime())) {
+        throw new AppError('Invalid date of birth', 400)
+      }
+      updates.dateOfBirth = dob
+    }
+  }
+
+  if (updates.phone !== undefined) {
+    updates.phone = String(updates.phone).trim()
+  }
+
+  // Handle address safely with dot-notation to avoid wiping unedited subfields (state, pincode)
+  if (updates.address !== undefined) {
+    const addr = updates.address
+    delete updates.address
+    if (typeof addr === 'object' && addr !== null) {
+      if (addr.village !== undefined) updates['address.village'] = String(addr.village).trim()
+      if (addr.district !== undefined) updates['address.district'] = String(addr.district).trim()
+      if (addr.state !== undefined) updates['address.state'] = String(addr.state).trim()
+      if (addr.pincode !== undefined) updates['address.pincode'] = String(addr.pincode).trim()
     }
   }
 
   if (Object.keys(updates).length === 0) {
-    throw new AppError('No valid fields provided for update', 400);
+    throw new AppError('No valid fields provided for update', 400)
   }
 
   let patientProfile = await PatientProfile.findOneAndUpdate(
@@ -73,10 +168,10 @@ async function updateMyProfile(req, res) {
       $set: updates
     },
     {
-      new: true,
+      returnDocument: 'after',
       runValidators: true
     }
-  ).populate('userId', 'fullName email loginId role isActive');
+  ).populate('userId', 'fullName email loginId role isActive')
 
   if (!patientProfile && req.user.loginId) {
     patientProfile = await PatientProfile.findOneAndUpdate(
@@ -87,21 +182,28 @@ async function updateMyProfile(req, res) {
         $set: updates
       },
       {
-        new: true,
+        returnDocument: 'after',
         runValidators: true
       }
-    ).populate('userId', 'fullName email loginId role isActive');
+    ).populate('userId', 'fullName email loginId role isActive')
   }
 
   if (!patientProfile) {
-    throw new AppError('Patient profile not found', 404);
+    throw new AppError('Patient profile not found', 404)
+  }
+
+  // If fullName was updated and linked to a User document, synchronize User.fullName
+  if (updates.fullName && req.user._id) {
+    await userModel.findByIdAndUpdate(req.user._id, {
+      $set: { fullName: updates.fullName }
+    })
   }
 
   res.status(200).json({
     success: true,
     message: 'Patient profile updated successfully',
     data: patientProfile
-  });
+  })
 }
 
 /**
