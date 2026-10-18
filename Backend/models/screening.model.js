@@ -160,6 +160,16 @@ const screeningSchema = new mongoose.Schema({
   timestamps: true
 });
 
+// SEC-08: Compound unique partial index enforcing screening reference uniqueness per patient.
+// Partial filter ensures missing, null, or undefined references do not conflict with each other.
+screeningSchema.index(
+  { patientId: 1, screeningReferenceId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { screeningReferenceId: { $type: 'string' } }
+  }
+)
+
 const Screening = mongoose.model('Screening', screeningSchema);
 
 module.exports = Screening;

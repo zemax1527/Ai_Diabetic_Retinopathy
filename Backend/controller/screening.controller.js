@@ -95,14 +95,15 @@ async function syncScreening(req, res) {
   }
 
   // Extract reference ID for idempotency
-  const screeningReferenceId =
+  const rawRef =
     payload.id ||
     payload.screeningId ||
     payload.screening_id ||
     sc.screening_id ||
     rawAi?.screening_id ||
-    payload.technical?.screeningId ||
-    `SCR-${Date.now()}`;
+    payload.technical?.screeningId;
+
+  const screeningReferenceId = rawRef ? String(rawRef).trim() : `SCR-${Date.now()}`;
 
   // Idempotency check: if already recorded for this patient profile, return existing record
   const existingScreening = await Screening.findOne({
@@ -199,50 +200,70 @@ async function syncScreening(req, res) {
   // Default initial status
   const screeningStatus = isReferable ? 'pending_review' : 'completed';
 
-  const newScreening = await Screening.create({
-    patientId: patientProfile._id,
-    userId: targetUserId,
-    screeningType,
-    conductedBy,
-    status: screeningStatus,
-    screeningReferenceId,
-    images: {
-      originalUrl,
-      heatmapUrl,
-      gradcamUrl,
-      lesionOverlayUrl
-    },
-    quality: {
-      status: qualityObj.status || 'Good',
-      score: typeof qualityObj.score === 'number' ? qualityObj.score : 1,
-      isFundus: qualityObj.isFundus !== undefined ? Boolean(qualityObj.isFundus) : true,
-      recommendation: qualityObj.recommendation || '',
-      checks: qualityChecks
-    },
-    aiResult: {
-      grade,
-      label,
-      confidence,
-      confidenceScore,
-      probabilities,
-      screeningDecision: {
-        decision: decisionText,
-        referable: isReferable,
-        reason: decisionReason
+  let newScreening;
+  try {
+    newScreening = await Screening.create({
+      patientId: patientProfile._id,
+      userId: targetUserId,
+      screeningType,
+      conductedBy,
+      status: screeningStatus,
+      screeningReferenceId,
+      images: {
+        originalUrl,
+        heatmapUrl,
+        gradcamUrl,
+        lesionOverlayUrl
+      },
+      quality: {
+        status: qualityObj.status || 'Good',
+        score: typeof qualityObj.score === 'number' ? qualityObj.score : 1,
+        isFundus: qualityObj.isFundus !== undefined ? Boolean(qualityObj.isFundus) : true,
+        recommendation: qualityObj.recommendation || '',
+        checks: qualityChecks
+      },
+      aiResult: {
+        grade,
+        label,
+        confidence,
+        confidenceScore,
+        probabilities,
+        screeningDecision: {
+          decision: decisionText,
+          referable: isReferable,
+          reason: decisionReason
+        }
+      },
+      explainability: {
+        method: explainObj.method || 'Grad-CAM++',
+        explanation: explainObj.explanation || '',
+        heatmapUrl,
+        overlayUrl: gradcamUrl
+      },
+      lesions: {
+        count: lesionCount,
+        summaryList,
+        model: lesionsObj.model || 'fundus-lesions-toolkit'
       }
-    },
-    explainability: {
-      method: explainObj.method || 'Grad-CAM++',
-      explanation: explainObj.explanation || '',
-      heatmapUrl,
-      overlayUrl: gradcamUrl
-    },
-    lesions: {
-      count: lesionCount,
-      summaryList,
-      model: lesionsObj.model || 'fundus-lesions-toolkit'
+    });
+  } catch (err) {
+    // Gracefully handle E11000 duplicate-key race condition
+    if (err.code === 11000 || (err.message && err.message.includes('E11000'))) {
+      const existingAfterRace = await Screening.findOne({
+        patientId: patientProfile._id,
+        screeningReferenceId
+      });
+      if (existingAfterRace) {
+        return res.status(200).json({
+          success: true,
+          message: 'Screening result already recorded',
+          data: existingAfterRace,
+          isDuplicate: true
+        });
+      }
     }
-  });
+    throw err;
+  }
 
   // Record audit event
   try {
