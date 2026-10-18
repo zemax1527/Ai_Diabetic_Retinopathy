@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Edit2, KeyRound, Save, X, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Edit2, KeyRound, Save, X, CheckCircle2, AlertCircle, Link2 } from 'lucide-react';
 import Button from '../common/Button';
 import Modal from '../common/Modal';
+import LinkPatientRecordCard from './LinkPatientRecordCard';
 import { updatePatientProfile } from '../../../api/patient';
 
 function extractFormData(patient) {
@@ -63,7 +64,7 @@ function extractFormData(patient) {
   };
 }
 
-export default function ProfileView({ patient, onProfileUpdated }) {
+export default function ProfileView({ patient, onProfileUpdated, onRecordClaimed }) {
   const [isEditing, setIsEditing] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -182,6 +183,18 @@ export default function ProfileView({ patient, onProfileUpdated }) {
               Cancel
             </Button>
           )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const el = document.getElementById('link-patient-record-section');
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }}
+            icon={Link2}
+          >
+            Link Record
+          </Button>
 
           <Button
             variant="secondary"
@@ -436,6 +449,18 @@ export default function ProfileView({ patient, onProfileUpdated }) {
           </div>
         )}
       </div>
+
+      {/* Link Existing Field Patient Record Card */}
+      <LinkPatientRecordCard
+        patient={patient}
+        onRecordClaimed={(claimedProfile) => {
+          if (onRecordClaimed) {
+            onRecordClaimed(claimedProfile);
+          } else if (onProfileUpdated) {
+            onProfileUpdated(claimedProfile);
+          }
+        }}
+      />
 
       {/* Change Password Modal */}
       <Modal

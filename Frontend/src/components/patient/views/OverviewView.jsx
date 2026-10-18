@@ -11,7 +11,6 @@ import {
   Sparkles,
   ChevronRight,
   FileText,
-  Clock,
   ShieldCheck,
 } from 'lucide-react';
 import SummaryCard from '../common/SummaryCard';
@@ -25,8 +24,9 @@ export default function OverviewView({
   onStartScreening,
   onViewScreeningResult,
   onViewAllHistory,
-  onRequestAppointment,
+  _onRequestAppointment,
   onNavigateEducation,
+  onLinkRecord,
 }) {
   const patientName = patient?.fullName || patient?.firstName || patient?.name || 'Patient';
   const patientId = patient?.id || patient?._id || patient?.loginId || 'Not assigned';
@@ -119,6 +119,35 @@ export default function OverviewView({
           accentColor={requiresFollowUp ? '#D97706' : '#059669'}
         />
       </div>
+
+      {/* ── Link Existing Field Record Banner ────────────────────────── */}
+      {patient?.registrationType !== 'field_worker' && onLinkRecord && (
+        <div className="rounded-3xl border border-sky-100 bg-gradient-to-r from-sky-50/70 via-blue-50/50 to-indigo-50/70 p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
+          <div className="flex items-start gap-3.5">
+            <div className="w-10 h-10 rounded-2xl bg-[#0E2F76] text-white flex items-center justify-center shrink-0 shadow-xs">
+              <FileText className="w-5 h-5 text-sky-200" />
+            </div>
+            <div>
+              <h4 className="text-sm sm:text-base font-bold text-[#0D1B3E]">
+                Registered at an outreach camp or mobile clinic?
+              </h4>
+              <p className="text-xs text-[#64748B] mt-0.5 max-w-xl">
+                Link your physical screening slip using your Patient ID and Claim Code to securely view your historical camp screenings.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onLinkRecord}
+            icon={ArrowRight}
+            iconPosition="right"
+            className="shrink-0 self-start sm:self-center"
+          >
+            Link Your Record
+          </Button>
+        </div>
+      )}
 
       {/* ── Primary Action: Start New Screening ────────────────────── */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#0E2F76] via-[#1a4499] to-[#059669] p-6 sm:p-8 text-white shadow-lg">

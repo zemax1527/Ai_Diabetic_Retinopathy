@@ -66,7 +66,7 @@ export default function PatientDashboard() {
             setScreenings(rawScreenings.map(adaptMongoScreening));
           }
         }
-      } catch (err) {
+      } catch {
         setPatientProfile({
           id: user?.id || user?._id || user?.loginId || 'DR-PAT-2026',
           fullName: user?.name || 'Patient',
@@ -104,15 +104,54 @@ export default function PatientDashboard() {
     setNotifications((prev) => [newNotif, ...prev]);
   };
 
-  // Notification handlers
-  const handleMarkAsRead = (notifId) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === notifId ? { ...n, read: true } : n))
-    );
-  };
+  // When an outreach field patient record is claimed:
+  const handleRecordClaimed = async (claimedProfile) => {
+    try {
+      const [profileRes, screeningsRes] = await Promise.allSettled([
+        fetchPatientProfile(),
+        fetchMyScreenings()
+      ]);
 
-  const handleMarkAllAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      if (profileRes.status === 'fulfilled') {
+        const data = profileRes.value?.data || profileRes.value;
+        const displayName = typeof data?.fullName === 'object'
+          ? `${data.fullName.firstName || ''} ${data.fullName.lastName || ''}`.trim()
+          : (data?.fullName || user?.name || 'Patient');
+
+        setPatientProfile({
+          ...data,
+          id: data?.patientId || user?.loginId || user?.id || 'DR-PAT-2026',
+          fullName: displayName,
+          email: user?.email || data?.email || '',
+        });
+      } else if (claimedProfile) {
+        setPatientProfile((prev) => ({
+          ...prev,
+          ...claimedProfile,
+          id: claimedProfile.patientId || prev?.id,
+        }));
+      }
+
+      if (screeningsRes.status === 'fulfilled') {
+        const rawScreenings = screeningsRes.value?.data || [];
+        if (Array.isArray(rawScreenings)) {
+          setScreenings(rawScreenings.map(adaptMongoScreening));
+        }
+      }
+
+      // Add a notification for the newly linked record
+      const newNotif = {
+        id: `notif-${Date.now()}`,
+        title: 'Patient Record Linked',
+        message: `Your outreach record #${claimedProfile?.patientId || 'PAT'} and historical screening reports are now linked to your account.`,
+        type: 'result',
+        time: 'Just now',
+        read: false,
+      };
+      setNotifications((prev) => [newNotif, ...prev]);
+    } catch (err) {
+      console.error('Failed to reload patient data after claim:', err);
+    }
   };
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -164,6 +203,7 @@ export default function PatientDashboard() {
           onViewAllHistory={() => setActiveTab('history')}
           onRequestAppointment={() => setActiveTab('appointments')}
           onNavigateEducation={() => setActiveTab('education')}
+          onLinkRecord={() => setActiveTab('profile')}
         />
       ) : activeTab === 'screening' ? (
         /* ── 3. Start New Screening Flow (Direct AI API) ─────── */
@@ -204,6 +244,7 @@ export default function PatientDashboard() {
         <ProfileView
           patient={patientProfile}
           onProfileUpdated={(updated) => setPatientProfile(updated)}
+          onRecordClaimed={handleRecordClaimed}
         />
       ) : activeTab === 'settings' ? (
         /* ── 9. Settings ─────────────────────────────────────── */

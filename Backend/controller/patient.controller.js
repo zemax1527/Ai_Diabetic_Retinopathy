@@ -434,6 +434,11 @@ async function claimPatientRecord(req, res) {
   }
 
   // 3. Atomic claim to prevent concurrent claims of the same record
+  // If caller had an empty initial placeholder profile without screenings, unlink its userId first so unique index is not violated
+  if (existingProfile && existingProfile._id.toString() !== targetProfile._id.toString()) {
+    await PatientProfile.findByIdAndUpdate(existingProfile._id, { $set: { userId: null } })
+  }
+
   const claimedProfile = await PatientProfile.findOneAndUpdate(
     {
       _id: targetProfile._id,
@@ -451,9 +456,14 @@ async function claimPatientRecord(req, res) {
       }
     },
     { returnDocument: 'after' }
-  );
+  )
 
   if (!claimedProfile) {
+    // Restore userId on existing placeholder profile if atomic claim failed
+    if (existingProfile && existingProfile._id.toString() !== targetProfile._id.toString()) {
+      await PatientProfile.findByIdAndUpdate(existingProfile._id, { $set: { userId: req.user._id } })
+    }
+
     try {
       await AuditLog.create({
         actorId: req.user._id,
@@ -464,14 +474,14 @@ async function claimPatientRecord(req, res) {
         userAgent: req.get('User-Agent'),
         status: 'failed',
         details: { patientId: normalizedPatientId, reason: 'concurrent_claim_conflict' }
-      });
+      })
     } catch (_) {}
-    throw new AppError(GENERIC_CLAIM_FAILURE_MESSAGE, 400);
+    throw new AppError(GENERIC_CLAIM_FAILURE_MESSAGE, 400)
   }
 
-  // If caller had an empty initial placeholder profile without screenings, remove it
+  // Remove the unlinked initial placeholder profile now that target is claimed
   if (existingProfile && existingProfile._id.toString() !== claimedProfile._id.toString()) {
-    await PatientProfile.findByIdAndDelete(existingProfile._id);
+    await PatientProfile.findByIdAndDelete(existingProfile._id)
   }
 
   // 4. Seamlessly link any historical screenings conducted at outreach camps to this patient account
