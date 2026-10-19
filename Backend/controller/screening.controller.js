@@ -4,6 +4,7 @@ const PatientProfile = require('../models/patientProfile.model');
 const User = require('../models/user.model');
 const AuditLog = require('../models/auditLog.model');
 const AppError = require('../utils/app.error');
+const { validateScreeningImages } = require('../utils/storage.validator');
 
 /**
  * POST /api/screenings/sync
@@ -103,7 +104,8 @@ async function syncScreening(req, res) {
     rawAi?.screening_id ||
     payload.technical?.screeningId;
 
-  const screeningReferenceId = rawRef ? String(rawRef).trim() : `SCR-${Date.now()}`;
+  const trimmedRef = (rawRef !== undefined && rawRef !== null) ? String(rawRef).trim() : '';
+  const screeningReferenceId = trimmedRef || `SCR-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
   // Idempotency check: if already recorded for this patient profile, return existing record
   const existingScreening = await Screening.findOne({
@@ -190,12 +192,54 @@ async function syncScreening(req, res) {
     }));
   }
 
-  // Extract images
-  const imagesObj = payload.images || sc.images || rawAi?.images || {};
-  const originalUrl = imagesObj.original || imagesObj.original_url || imagesObj.originalUrl || payload.fundusImage || payload.originalUrl || '';
-  const heatmapUrl = imagesObj.heatmap || imagesObj.heatmap_url || imagesObj.heatmapUrl || explainObj.heatmapUrl || explainObj.heatmap_url || payload.heatmapImage || '';
-  const gradcamUrl = imagesObj.gradcam || imagesObj.gradcam_url || imagesObj.gradcamUrl || explainObj.gradcamUrl || explainObj.overlay_url || '';
-  const lesionOverlayUrl = imagesObj.lesionOverlay || imagesObj.lesion_overlay_url || imagesObj.lesionOverlayUrl || lesionsObj.overlay_url || '';
+  // Extract and validate images (SEC-09)
+  const imageValidation = validateScreeningImages({
+    originalUrl: [
+      payload.images?.originalUrl,
+      payload.images?.original_url,
+      payload.images?.original,
+      payload.originalUrl,
+      payload.fundusImage,
+      sc.images?.original_url,
+      sc.images?.original,
+      rawAi?.images?.original_url,
+      rawAi?.images?.original
+    ],
+    heatmapUrl: [
+      payload.images?.heatmapUrl,
+      payload.images?.heatmap_url,
+      payload.images?.heatmap,
+      payload.heatmapImage,
+      explainObj.heatmap_url,
+      explainObj.heatmapUrl,
+      sc.images?.heatmap_url,
+      rawAi?.images?.heatmap_url
+    ],
+    gradcamUrl: [
+      payload.images?.gradcamUrl,
+      payload.images?.gradcam_url,
+      payload.images?.gradcam,
+      explainObj.overlay_url,
+      explainObj.gradcamUrl,
+      sc.images?.gradcam_url,
+      rawAi?.images?.gradcam_url
+    ],
+    lesionOverlayUrl: [
+      payload.images?.lesionOverlayUrl,
+      payload.images?.lesion_overlay_url,
+      payload.images?.lesionOverlay,
+      lesionsObj.overlay_url,
+      sc.images?.lesion_overlay_url,
+      rawAi?.images?.lesion_overlay_url
+    ]
+  });
+
+  if (!imageValidation.valid) {
+    throw new AppError('Invalid screening image URL. Only secure URLs from approved storage providers are permitted.', 400);
+  }
+
+  const { sanitizedImages, storageProvider, providers } = imageValidation;
+  const { originalUrl, heatmapUrl, gradcamUrl, lesionOverlayUrl } = sanitizedImages;
 
   // Default initial status
   const screeningStatus = isReferable ? 'pending_review' : 'completed';
@@ -213,7 +257,9 @@ async function syncScreening(req, res) {
         originalUrl,
         heatmapUrl,
         gradcamUrl,
-        lesionOverlayUrl
+        lesionOverlayUrl,
+        storageProvider,
+        providers
       },
       quality: {
         status: qualityObj.status || 'Good',

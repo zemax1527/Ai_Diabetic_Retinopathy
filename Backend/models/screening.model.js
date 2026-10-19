@@ -52,7 +52,18 @@ const screeningSchema = new mongoose.Schema({
     originalUrl: { type: String, trim: true },
     heatmapUrl: { type: String, trim: true },
     gradcamUrl: { type: String, trim: true },
-    lesionOverlayUrl: { type: String, trim: true }
+    lesionOverlayUrl: { type: String, trim: true },
+    storageProvider: {
+      type: String,
+      enum: ['azure_blob', 'cloudinary', 'local', 'external_secure', 'mixed', 'unknown'],
+      default: 'unknown'
+    },
+    providers: {
+      originalUrl: { type: String, default: null },
+      heatmapUrl: { type: String, default: null },
+      gradcamUrl: { type: String, default: null },
+      lesionOverlayUrl: { type: String, default: null }
+    }
   },
 
   // Optical quality metrics
