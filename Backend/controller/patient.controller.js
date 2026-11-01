@@ -249,7 +249,7 @@ async function registerFieldPatient(req, res) {
     gender: gender || 'other',
     address: address || {},
     diabetesStatus: diabetesStatus || 'unknown',
-    diabetesDuration: diabetesDuration ? Number(diabetesDuration) : undefined,
+    diabetesDuration: (diabetesDuration !== undefined && diabetesDuration !== null) ? Number(diabetesDuration) : undefined,
     registrationType: 'field_worker',
     registeredBy: req.user._id,
     claimStatus: 'unclaimed',
