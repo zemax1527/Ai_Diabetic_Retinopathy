@@ -5,6 +5,7 @@ const HealthcareWorkerProfile = require('../models/healthCare.model')
 const DoctorProfile = require('../models/doctorProfile.model')
 const AppError = require('../utils/app.error')
 const generateLoginId = require('../utils/generateLoginId')
+const notificationService = require('../services/notification.service')
 
 // ─── Allowed public roles ────────────────────────────────────────────────────
 
@@ -185,6 +186,14 @@ async function userRegistration(req, res) {
       maxAge: 7 * 24 * 60 * 60 * 1000
     })
 
+    // Trigger asynchronous notification (fire-and-forget, never breaks registration)
+    notificationService.sendPatientRegistrationNotice({
+      email: user.email,
+      phone: patientData.phone,
+      fullName: user.fullName,
+      loginId: user.loginId
+    }).catch(err => console.error('[Notification:PatientRegister] Failed:', err.message))
+
     return res.status(201).json({
       status: 'success',
       message: 'Patient registration successful. You can now log in.',
@@ -327,6 +336,14 @@ async function userRegistration(req, res) {
 
     // ── No cookie or JWT for pending registrations ───────────────────────────
     // createdUser.isActive === false; login will be blocked until approved.
+
+    // Trigger asynchronous notification (fire-and-forget, never breaks registration)
+    notificationService.sendStaffApplicationReceivedNotice({
+      email: createdUser.email,
+      phone: profile.phone,
+      fullName: createdUser.fullName,
+      role: createdUser.role
+    }).catch(err => console.error('[Notification:HCWRegister] Failed:', err.message))
 
     return res.status(201).json({
       status: 'success',
@@ -501,6 +518,14 @@ async function userRegistration(req, res) {
 
     // ── No cookie or JWT for pending registrations ───────────────────────────
     // createdUser.isActive === false; login will be blocked until approved.
+
+    // Trigger asynchronous notification (fire-and-forget, never breaks registration)
+    notificationService.sendStaffApplicationReceivedNotice({
+      email: createdUser.email,
+      phone: profile.phone,
+      fullName: createdUser.fullName,
+      role: createdUser.role
+    }).catch(err => console.error('[Notification:DoctorRegister] Failed:', err.message))
 
     return res.status(201).json({
       status: 'success',
@@ -761,6 +786,14 @@ async function completeProfile(req, res) {
       { upsert: true, new: true }
     )
 
+    notificationService.sendProfileCompletionNotice({
+      email: user.email,
+      phone: patientData.phone,
+      fullName: user.fullName,
+      role: 'patient',
+      loginId: user.loginId
+    }).catch(err => console.error('[Notification:PatientProfileComplete] Failed:', err.message))
+
     return res.status(200).json({
       status: 'success',
       message: 'Patient profile completed successfully',
@@ -815,6 +848,13 @@ async function completeProfile(req, res) {
       { $set: profileData },
       { upsert: true, new: true }
     )
+
+    notificationService.sendProfileCompletionNotice({
+      email: user.email,
+      phone: profileData.phone,
+      fullName: user.fullName,
+      role: 'healthcare_worker'
+    }).catch(err => console.error('[Notification:HCWProfileComplete] Failed:', err.message))
 
     return res.status(200).json({
       status: 'success',
@@ -872,6 +912,13 @@ async function completeProfile(req, res) {
       { $set: profileData },
       { upsert: true, new: true }
     )
+
+    notificationService.sendProfileCompletionNotice({
+      email: user.email,
+      phone: profileData.phone,
+      fullName: user.fullName,
+      role: 'doctor'
+    }).catch(err => console.error('[Notification:DoctorProfileComplete] Failed:', err.message))
 
     return res.status(200).json({
       status: 'success',

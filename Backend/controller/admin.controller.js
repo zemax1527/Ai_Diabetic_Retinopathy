@@ -7,6 +7,7 @@ const Screening = require('../models/screening.model');
 const AuditLog = require('../models/auditLog.model');
 const AppError = require('../utils/app.error');
 const generateLoginId = require('../utils/generateLoginId');
+const notificationService = require('../services/notification.service');
 
 // Roles that go through the verification flow
 const VERIFIABLE_ROLES = ['healthcare_worker', 'doctor'];
@@ -143,6 +144,35 @@ async function approveVerification(req, res) {
     console.error('Audit log failed:', err.message);
   }
 
+  // Trigger approval notification asynchronously
+  (async () => {
+    let phone = null;
+    try {
+      if (updatedUser.role === 'doctor') {
+        const docProf = await DoctorProfile.findOne({ userId: updatedUser._id }).select('phone');
+        if (docProf?.phone) phone = docProf.phone;
+      } else if (updatedUser.role === 'healthcare_worker') {
+        const hcwProf = await HealthcareWorkerProfile.findOne({ userId: updatedUser._id }).select('phone');
+        if (hcwProf?.phone) phone = hcwProf.phone;
+      }
+    } catch (phoneErr) {
+      console.error('[Notification:AdminApprove] Phone lookup failed');
+      phone = null;
+    }
+
+    try {
+      await notificationService.sendStaffApprovalNotice({
+        email: updatedUser.email,
+        phone,
+        fullName: updatedUser.fullName,
+        role: updatedUser.role,
+        loginId: updatedUser.loginId
+      });
+    } catch (notifErr) {
+      console.error('[Notification:AdminApprove] Notification dispatch failed');
+    }
+  })();
+
   return res.status(200).json({
     success: true,
     message: 'Verification approved successfully',
@@ -233,6 +263,35 @@ async function rejectVerification(req, res) {
   } catch (err) {
     console.error('Audit log failed:', err.message);
   }
+
+  // Trigger rejection notification asynchronously
+  (async () => {
+    let phone = null;
+    try {
+      if (updatedUser.role === 'doctor') {
+        const docProf = await DoctorProfile.findOne({ userId: updatedUser._id }).select('phone');
+        if (docProf?.phone) phone = docProf.phone;
+      } else if (updatedUser.role === 'healthcare_worker') {
+        const hcwProf = await HealthcareWorkerProfile.findOne({ userId: updatedUser._id }).select('phone');
+        if (hcwProf?.phone) phone = hcwProf.phone;
+      }
+    } catch (phoneErr) {
+      console.error('[Notification:AdminReject] Phone lookup failed');
+      phone = null;
+    }
+
+    try {
+      await notificationService.sendStaffRejectionNotice({
+        email: updatedUser.email,
+        phone,
+        fullName: updatedUser.fullName,
+        role: updatedUser.role,
+        reason
+      });
+    } catch (notifErr) {
+      console.error('[Notification:AdminReject] Notification dispatch failed');
+    }
+  })();
 
   return res.status(200).json({
     success: true,

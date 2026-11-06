@@ -6,6 +6,7 @@ const userModel = require('../models/user.model');
 const Screening = require('../models/screening.model');
 const AuditLog = require('../models/auditLog.model');
 const generateLoginId = require('../utils/generateLoginId');
+const notificationService = require('../services/notification.service');
 const AppError = require('../utils/app.error');
 
 // Allowed fields a patient can update on their own profile
@@ -276,6 +277,15 @@ async function registerFieldPatient(req, res) {
     console.error('AuditLog error in registerFieldPatient:', err.message);
   }
 
+  // Trigger SMS notification if phone is present (NEVER send claim code)
+  if (patientProfile.phone) {
+    notificationService.sendFieldPatientRegistrationNotice({
+      phone: patientProfile.phone,
+      fullName: patientProfile.fullName,
+      patientId: patientProfile.patientId
+    }).catch(err => console.error('[Notification:FieldPatientRegister] Failed:', err.message));
+  }
+
   // 5. Return success with the one-time claim code to be printed on the outreach card
   res.status(201).json({
     success: true,
@@ -512,6 +522,14 @@ async function claimPatientRecord(req, res) {
   } catch (err) {
     console.error('AuditLog error in claimPatientRecord:', err.message);
   }
+
+  // Trigger claim notification asynchronously
+  notificationService.sendPatientRecordClaimedNotice({
+    email: req.user.email,
+    phone: claimedProfile.phone,
+    fullName: req.user.fullName || claimedProfile.fullName,
+    patientId: claimedProfile.patientId
+  }).catch(err => console.error('[Notification:PatientRecordClaimed] Failed:', err.message));
 
   res.status(200).json({
     success: true,
